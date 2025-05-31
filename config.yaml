@@ -1,0 +1,24 @@
+postgres:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: postgres
+  db: ticketdb
+
+redis:
+  host: redis
+  port: 6379
+  db: 0
+
+rabbitmq:
+  host: rabbitmq
+  port: 5672
+  user: guest
+  password: guest
+
+jwt:
+  secret: supersecretkey
+  ttl_minutes: 15
+
+app:
+  port: 8080 
