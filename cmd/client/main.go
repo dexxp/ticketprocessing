@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -14,15 +16,25 @@ const (
 	baseURL = "http://localhost:8080"
 )
 
+type Session struct {
+	Token      string
+	UserInfo   map[string]interface{}
+	IsLoggedIn bool
+}
+
 type Client struct {
 	httpClient *http.Client
-	token      string
+	session    *Session
 }
 
 func NewClient() *Client {
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
+		},
+		session: &Session{
+			UserInfo:   make(map[string]interface{}),
+			IsLoggedIn: false,
 		},
 	}
 }
@@ -93,8 +105,15 @@ func (c *Client) Login(email, password string) error {
 		return fmt.Errorf("failed to decode login response: %w", err)
 	}
 
-	c.token = authResp.Token
-	fmt.Println("Login successful! Token received.")
+	c.session.Token = authResp.Token
+	c.session.IsLoggedIn = true
+
+	// Get user info after login
+	if err := c.GetMe(); err != nil {
+		return fmt.Errorf("failed to get user info after login: %w", err)
+	}
+
+	fmt.Println("Login successful! You are now logged in.")
 	return nil
 }
 
@@ -110,12 +129,10 @@ func (c *Client) GetMe() error {
 		return fmt.Errorf("get me failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&c.session.UserInfo); err != nil {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	fmt.Printf("Current user info: %+v\n", result)
 	return nil
 }
 
@@ -207,89 +224,217 @@ func (c *Client) sendRequest(method, path string, body interface{}, auth bool) (
 
 	req.Header.Set("Content-Type", "application/json")
 	if auth {
-		if c.token == "" {
+		if !c.session.IsLoggedIn || c.session.Token == "" {
 			return nil, fmt.Errorf("no authentication token available")
 		}
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Authorization", "Bearer "+c.session.Token)
 	}
 
 	return c.httpClient.Do(req)
 }
 
+func printWelcome() {
+	fmt.Println("\n=== Welcome to the Rental Equipment Client ===")
+	fmt.Println("Type 'help' to see available commands")
+	fmt.Println("Type 'exit' to quit the application")
+	fmt.Println("===========================================\n")
+}
+
+func printHelp(isLoggedIn bool) {
+	fmt.Println("\nAvailable commands:")
+	if !isLoggedIn {
+		fmt.Println("  register <name> <email> <password> - Register a new account")
+		fmt.Println("  login <email> <password>          - Login to your account")
+	} else {
+		fmt.Println("  me                                - Show your profile information")
+		fmt.Println("  create-request <equipment_id> <start_date> <end_date> <comment> - Create a rental request")
+		fmt.Println("  get-status <request_id>           - Get status of a rental request")
+		fmt.Println("  get-status-at <request_id> <datetime> - Get status of a rental request at specific time")
+		fmt.Println("  logout                            - Logout from your account")
+	}
+	fmt.Println("  help                               - Show this help message")
+	fmt.Println("  exit                               - Exit the application")
+	fmt.Println()
+}
+
+func (c *Client) Logout() {
+	c.session.Token = ""
+	c.session.IsLoggedIn = false
+	c.session.UserInfo = make(map[string]interface{})
+	fmt.Println("Successfully logged out!")
+}
+
+func parseCommandLine(input string) []string {
+	var args []string
+	var current strings.Builder
+	inQuotes := false
+
+	for i := 0; i < len(input); i++ {
+		switch input[i] {
+		case '"':
+			if i > 0 && input[i-1] == '\\' {
+				// Handle escaped quotes
+				current.WriteByte(input[i])
+			} else {
+				inQuotes = !inQuotes
+			}
+		case ' ':
+			if inQuotes {
+				current.WriteByte(input[i])
+			} else if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(input[i])
+		}
+	}
+
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+
+	return args
+}
+
 func main() {
 	client := NewClient()
+	scanner := bufio.NewScanner(os.Stdin)
 
-	// Example usage
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: client <command> [args...]")
-		fmt.Println("Commands:")
-		fmt.Println("  register <name> <email> <password>")
-		fmt.Println("  login <email> <password>")
-		fmt.Println("  me")
-		fmt.Println("  create-request <equipment_id> <start_date> <end_date> <comment>")
-		fmt.Println("  get-status <request_id>")
-		fmt.Println("  get-status-at <request_id> <datetime>")
-		return
+	printWelcome()
+	printHelp(client.session.IsLoggedIn)
+
+	for {
+		fmt.Print("> ")
+		if !scanner.Scan() {
+			break
+		}
+
+		input := scanner.Text()
+		if len(input) == 0 {
+			continue
+		}
+
+		args := parseCommandLine(input)
+		if len(args) == 0 {
+			continue
+		}
+
+		command := args[0]
+		var err error
+
+		switch command {
+		case "help":
+			printHelp(client.session.IsLoggedIn)
+
+		case "exit":
+			fmt.Println("Goodbye!")
+			return
+
+		case "register":
+			if len(args) != 4 {
+				fmt.Println("Usage: register <name> <email> <password>")
+				continue
+			}
+			err = client.Register(args[1], args[2], args[3])
+			if err == nil {
+				fmt.Println("Registration successful! Please login to continue.")
+			}
+
+		case "login":
+			if len(args) != 3 {
+				fmt.Println("Usage: login <email> <password>")
+				continue
+			}
+			err = client.Login(args[1], args[2])
+			if err == nil {
+				printHelp(true)
+			}
+
+		case "logout":
+			if !client.session.IsLoggedIn {
+				fmt.Println("You are not logged in!")
+				continue
+			}
+			client.Logout()
+			printHelp(false)
+
+		case "me":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			err = client.GetMe()
+			if err == nil {
+				fmt.Printf("Your profile: %+v\n", client.session.UserInfo)
+			}
+
+		case "create-request":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			if len(args) != 5 {
+				fmt.Println("Usage: create-request <equipment_id> <start_date> <end_date> <comment>")
+				fmt.Println("Example: create-request 1 \"2024-03-20T10:00:00Z\" \"2024-03-25T18:00:00Z\" \"Need for weekend\"")
+				continue
+			}
+			equipmentID := uint(0)
+			fmt.Sscanf(args[1], "%d", &equipmentID)
+			startDate, err := time.Parse(time.RFC3339, args[2])
+			if err != nil {
+				fmt.Println("Invalid start date format. Use RFC3339 format (e.g., 2024-03-20T10:00:00Z)")
+				continue
+			}
+			endDate, err := time.Parse(time.RFC3339, args[3])
+			if err != nil {
+				fmt.Println("Invalid end date format. Use RFC3339 format (e.g., 2024-03-20T10:00:00Z)")
+				continue
+			}
+			err = client.CreateRentalRequest(equipmentID, startDate, endDate, args[4])
+
+		case "get-status":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			if len(args) != 2 {
+				fmt.Println("Usage: get-status <request_id>")
+				continue
+			}
+			requestID := uint(0)
+			fmt.Sscanf(args[1], "%d", &requestID)
+			err = client.GetRequestStatus(requestID)
+
+		case "get-status-at":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			if len(args) != 3 {
+				fmt.Println("Usage: get-status-at <request_id> <datetime>")
+				continue
+			}
+			requestID := uint(0)
+			fmt.Sscanf(args[1], "%d", &requestID)
+			datetime, err := time.Parse(time.RFC3339, args[2])
+			if err != nil {
+				fmt.Println("Invalid datetime format. Use RFC3339 format (e.g., 2024-03-20T15:04:05Z)")
+				continue
+			}
+			err = client.GetRequestStatusAt(requestID, datetime)
+
+		default:
+			fmt.Printf("Unknown command: %s\nType 'help' to see available commands\n", command)
+			continue
+		}
+
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 
-	command := os.Args[1]
-	var err error
-
-	switch command {
-	case "register":
-		if len(os.Args) != 5 {
-			fmt.Println("Usage: client register <name> <email> <password>")
-			return
-		}
-		err = client.Register(os.Args[2], os.Args[3], os.Args[4])
-
-	case "login":
-		if len(os.Args) != 4 {
-			fmt.Println("Usage: client login <email> <password>")
-			return
-		}
-		err = client.Login(os.Args[2], os.Args[3])
-
-	case "me":
-		err = client.GetMe()
-
-	case "create-request":
-		if len(os.Args) != 6 {
-			fmt.Println("Usage: client create-request <equipment_id> <start_date> <end_date> <comment>")
-			return
-		}
-		equipmentID := uint(0)
-		fmt.Sscanf(os.Args[2], "%d", &equipmentID)
-		startDate, _ := time.Parse(time.RFC3339, os.Args[3])
-		endDate, _ := time.Parse(time.RFC3339, os.Args[4])
-		err = client.CreateRentalRequest(equipmentID, startDate, endDate, os.Args[5])
-
-	case "get-status":
-		if len(os.Args) != 3 {
-			fmt.Println("Usage: client get-status <request_id>")
-			return
-		}
-		requestID := uint(0)
-		fmt.Sscanf(os.Args[2], "%d", &requestID)
-		err = client.GetRequestStatus(requestID)
-
-	case "get-status-at":
-		if len(os.Args) != 4 {
-			fmt.Println("Usage: client get-status-at <request_id> <datetime>")
-			return
-		}
-		requestID := uint(0)
-		fmt.Sscanf(os.Args[2], "%d", &requestID)
-		datetime, _ := time.Parse(time.RFC3339, os.Args[3])
-		err = client.GetRequestStatusAt(requestID, datetime)
-
-	default:
-		fmt.Printf("Unknown command: %s\n", command)
-		return
-	}
-
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error reading input:", err)
 	}
 }
