@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"ticketprocessing/internal/service"
 
@@ -39,12 +40,12 @@ func (h *UserHandler) Register(c echo.Context) error {
 	}
 
 	err := h.authService.Register(c.Request().Context(), req.Name, req.Email, req.Password)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		return c.NoContent(http.StatusCreated)
-	case service.ErrUserExists:
+	case errors.Is(err, service.ErrUserExists):
 		return echo.NewHTTPError(http.StatusBadRequest, "user already exists")
-	case service.ErrInternal:
+	case errors.Is(err, service.ErrInternal):
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, "unexpected error")
@@ -57,17 +58,13 @@ func (h *UserHandler) Login(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request format")
 	}
 
-	if err := c.Validate(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
 	token, err := h.authService.Login(c.Request().Context(), req.Email, req.Password)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		return c.JSON(http.StatusOK, AuthResponse{Token: token})
-	case service.ErrInvalidCredentials:
+	case errors.Is(err, service.ErrInvalidCredentials):
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
-	case service.ErrInternal:
+	case errors.Is(err, service.ErrInternal):
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, "unexpected error")

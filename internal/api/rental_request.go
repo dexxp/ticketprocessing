@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"ticketprocessing/internal/service"
@@ -38,10 +39,6 @@ func (h *RentalRequestHandler) CreateRentalRequest(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request format")
 	}
 
-	if err := c.Validate(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
 	// Получаем ID пользователя из контекста (установлен middleware аутентификации)
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
@@ -49,12 +46,12 @@ func (h *RentalRequestHandler) CreateRentalRequest(c echo.Context) error {
 	}
 
 	request, err := h.rentalRequestService.CreateRentalRequest(c.Request().Context(), userID, req)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		return c.JSON(http.StatusCreated, request)
-	case service.ErrEquipmentNotFound:
+	case errors.Is(err, service.ErrEquipmentNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "equipment not found")
-	case service.ErrInvalidDateRange:
+	case errors.Is(err, service.ErrInvalidDateRange):
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date range")
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
@@ -81,10 +78,10 @@ func (h *RentalRequestHandler) GetRequestStatus(c echo.Context) error {
 	}
 
 	status, err := h.rentalRequestService.GetRequestStatus(c.Request().Context(), uint(id))
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		return c.JSON(http.StatusOK, status)
-	case service.ErrRentalRequestNotFound:
+	case errors.Is(err, service.ErrRentalRequestNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "rental request not found")
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
@@ -122,12 +119,12 @@ func (h *RentalRequestHandler) GetRequestStatusAt(c echo.Context) error {
 	}
 
 	status, err := h.rentalRequestService.GetRequestStatusAt(c.Request().Context(), uint(id), datetime)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		return c.JSON(http.StatusOK, status)
-	case service.ErrRentalRequestNotFound:
+	case errors.Is(err, service.ErrRentalRequestNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "rental request not found")
-	case service.ErrInvalidDateTime:
+	case errors.Is(err, service.ErrInvalidDateTime):
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid datetime")
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
