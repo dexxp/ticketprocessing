@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"ticketprocessing/internal/messaging"
 	"ticketprocessing/internal/models"
 	"ticketprocessing/internal/repository"
@@ -87,9 +88,10 @@ func (s *rentalRequestService) CreateRentalRequest(ctx context.Context, userID u
 	}
 
 	// Проверяем даты
-	if req.FromDate.After(req.ToDate) || req.FromDate.Before(time.Now()) {
-		return nil, ErrInvalidDateRange
-	}
+	log.Println(req)
+	//if req.FromDate.After(req.ToDate) || req.FromDate.Before(time.Now()) {
+	//	return nil, ErrInvalidDateRange
+	//}
 
 	// Создаем заявку
 	rentalRequest := &models.RentalRequest{

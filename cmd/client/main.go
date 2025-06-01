@@ -61,6 +61,12 @@ type CreateRentalRequest struct {
 	Comment     string    `json:"comment"`
 }
 
+type Equipment struct {
+	ID                uint   `json:"id"`
+	Name              string `json:"name"`
+	AvailableQuantity int    `json:"available_quantity"`
+}
+
 func (c *Client) Register(name, email, password string) error {
 	req := RegisterRequest{
 		Name:     name,
@@ -207,6 +213,96 @@ func (c *Client) GetRequestStatusAt(requestID uint, datetime time.Time) error {
 	return nil
 }
 
+func (c *Client) CreateEquipment(name string, quantity int) error {
+	req := Equipment{
+		Name:              name,
+		AvailableQuantity: quantity,
+	}
+
+	resp, err := c.sendRequest("POST", "/api/equipment", req, true)
+	if err != nil {
+		return fmt.Errorf("create equipment failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("create equipment failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var equipment Equipment
+	if err := json.NewDecoder(resp.Body).Decode(&equipment); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	fmt.Printf("Equipment created: %+v\n", equipment)
+	return nil
+}
+
+func (c *Client) GetEquipment(id uint) error {
+	resp, err := c.sendRequest("GET", fmt.Sprintf("/api/equipment/%d", id), nil, true)
+	if err != nil {
+		return fmt.Errorf("get equipment failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("get equipment failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var equipment Equipment
+	if err := json.NewDecoder(resp.Body).Decode(&equipment); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	fmt.Printf("Equipment: %+v\n", equipment)
+	return nil
+}
+
+func (c *Client) UpdateEquipment(id uint, name string, quantity int) error {
+	req := Equipment{
+		ID:                id,
+		Name:              name,
+		AvailableQuantity: quantity,
+	}
+
+	resp, err := c.sendRequest("PUT", fmt.Sprintf("/api/equipment/%d", id), req, true)
+	if err != nil {
+		return fmt.Errorf("update equipment failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update equipment failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var equipment Equipment
+	if err := json.NewDecoder(resp.Body).Decode(&equipment); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	fmt.Printf("Equipment updated: %+v\n", equipment)
+	return nil
+}
+
+func (c *Client) DeleteEquipment(id uint) error {
+	resp, err := c.sendRequest("DELETE", fmt.Sprintf("/api/equipment/%d", id), nil, true)
+	if err != nil {
+		return fmt.Errorf("delete equipment failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete equipment failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	fmt.Printf("Equipment %d deleted successfully\n", id)
+	return nil
+}
+
 func (c *Client) sendRequest(method, path string, body interface{}, auth bool) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
@@ -247,6 +343,12 @@ func printHelp(isLoggedIn bool) {
 		fmt.Println("  login <email> <password>          - Login to your account")
 	} else {
 		fmt.Println("  me                                - Show your profile information")
+		fmt.Println("\nEquipment Management:")
+		fmt.Println("  create-equipment <name> <quantity> - Create new equipment")
+		fmt.Println("  get-equipment <id>                - Get equipment details")
+		fmt.Println("  update-equipment <id> <name> <quantity> - Update equipment")
+		fmt.Println("  delete-equipment <id>             - Delete equipment")
+		fmt.Println("\nRental Requests:")
 		fmt.Println("  create-request <equipment_id> <start_date> <end_date> <comment> - Create a rental request")
 		fmt.Println("  get-status <request_id>           - Get status of a rental request")
 		fmt.Println("  get-status-at <request_id> <datetime> - Get status of a rental request at specific time")
@@ -368,6 +470,60 @@ func main() {
 			if err == nil {
 				fmt.Printf("Your profile: %+v\n", client.session.UserInfo)
 			}
+
+		case "create-equipment":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			if len(args) != 3 {
+				fmt.Println("Usage: create-equipment <name> <quantity>")
+				continue
+			}
+			quantity := 0
+			fmt.Sscanf(args[2], "%d", &quantity)
+			err = client.CreateEquipment(args[1], quantity)
+
+		case "get-equipment":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			if len(args) != 2 {
+				fmt.Println("Usage: get-equipment <id>")
+				continue
+			}
+			id := uint(0)
+			fmt.Sscanf(args[1], "%d", &id)
+			err = client.GetEquipment(id)
+
+		case "update-equipment":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			if len(args) != 4 {
+				fmt.Println("Usage: update-equipment <id> <name> <quantity>")
+				continue
+			}
+			id := uint(0)
+			quantity := 0
+			fmt.Sscanf(args[1], "%d", &id)
+			fmt.Sscanf(args[3], "%d", &quantity)
+			err = client.UpdateEquipment(id, args[2], quantity)
+
+		case "delete-equipment":
+			if !client.session.IsLoggedIn {
+				fmt.Println("Please login first!")
+				continue
+			}
+			if len(args) != 2 {
+				fmt.Println("Usage: delete-equipment <id>")
+				continue
+			}
+			id := uint(0)
+			fmt.Sscanf(args[1], "%d", &id)
+			err = client.DeleteEquipment(id)
 
 		case "create-request":
 			if !client.session.IsLoggedIn {

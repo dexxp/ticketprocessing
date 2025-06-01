@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"syscall"
 	"ticketprocessing/internal/config"
 	"ticketprocessing/internal/db"
 	"ticketprocessing/internal/models"
@@ -101,20 +100,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	done := make(chan bool)
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	ctx, done := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 
 	go func() {
 		for msg := range msgs {
-			processMessage(context.Background(), msg, rentalRequestRepo, statusLogRepo, log)
+			processMessage(ctx, msg, rentalRequestRepo, statusLogRepo, log)
 		}
-		done <- true
+		done()
 	}()
 
 	log.Info("Worker started, waiting for messages...")
 
-	<-sigChan
+	<-ctx.Done()
 	log.Info("Shutting down worker...")
 
 	if err := ch.Close(); err != nil {
@@ -124,7 +121,6 @@ func main() {
 		log.Error("failed to close connection", slog.String("error", err.Error()))
 	}
 
-	<-done
 	log.Info("Worker stopped")
 }
 

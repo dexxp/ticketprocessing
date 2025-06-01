@@ -65,6 +65,7 @@ services:
       - postgres
       - redis
       - rabbitmq
+    restart: unless-stopped
     networks:
       - app-network
 

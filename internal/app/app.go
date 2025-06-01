@@ -50,7 +50,7 @@ func NewApp() {
 		return
 	}
 
-	if err := db.AutoMigrate(&models.User{}, &models.RentalRequest{}, &models.RequestStatusLog{}); err != nil {
+	if err := models.AutoMigrate(db); err != nil {
 		slog.Warn("failed to migrate postgres", slog.String("error", err.Error()))
 		return
 	}
@@ -77,6 +77,7 @@ func NewApp() {
 	// Initialize services
 	authService := service.NewAuthService(authRepo, jwtManager, redisStore)
 	rentalRequestService := service.NewRentalRequestService(rentalRequestRepo, requestStatusLogRepo, equipmentRepo, rabbitMQ)
+	equipmentService := service.NewEquipment(equipmentRepo)
 
 	// Initialize Echo
 	e := echo.New()
@@ -89,6 +90,7 @@ func NewApp() {
 	// Initialize handlers
 	userHandler := api.NewUserHandler(authService)
 	rentalRequestHandler := api.NewRentalRequestHandler(rentalRequestService)
+	equipmentHandler := api.NewEquipmentHandler(equipmentService)
 
 	// Public routes
 	e.POST("/register", userHandler.Register)
@@ -105,6 +107,11 @@ func NewApp() {
 	rental.POST("", rentalRequestHandler.CreateRentalRequest)
 	rental.GET("/:id/status", rentalRequestHandler.GetRequestStatus)
 	rental.GET("/:id/status_at", rentalRequestHandler.GetRequestStatusAt)
+
+	// Equipment routes
+	equipment := e.Group("/api/equipment")
+	equipment.Use(api.AuthMiddleware(jwtManager, redisStore))
+	equipmentHandler.RegisterRoutes(e)
 
 	// Start server
 	port := cfg.App.Port
